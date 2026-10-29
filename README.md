@@ -15,10 +15,30 @@ packages.
 
 ## Quick start
 
+Set up a pipeline folder, one per species:
+
+```
+TF_Enrichment_Pipeline/
+├── input/       gene list to test, background list, id_map.tsv
+├── reference/   one *.tsv per TF–target DB
+├── output/      results (created if missing)
+└── script/      tf_enrichment.py
+```
+
+Then run from the pipeline folder:
+
+```bash
+cd TF_Enrichment_Pipeline
+python script/tf_enrichment.py --input input/genes.txt --background input/background.txt
+```
+
+Every `*.tsv` file in `reference/` is tested as one DB, `input/id_map.tsv` converts IDs to
+symbols, and results go to `output/`. These defaults are relative to the folder you run from; any
+of them can be replaced with an explicit path:
+
 ```bash
 python tf_enrichment.py \
-  --input input_ids.txt \
-  --background background_ids.txt \
+  --input genes.txt --background background.txt \
   --id-map id_map.tsv \
   --ref refs/DB_A.tsv --ref refs/DB_B.tsv \
   --outdir results/
@@ -28,11 +48,14 @@ python tf_enrichment.py \
 |---|---|---|
 | `--input` | required | Gene IDs to test |
 | `--background` | required | Gene IDs the null distribution draws from |
-| `--id-map` | required | ID-to-symbol table for the same species |
-| `--ref` | required, repeatable | One TF–target reference file per DB |
-| `--outdir` | required | Output folder |
+| `--id-map` | `input/id_map.tsv` | ID-to-symbol table for the same species |
+| `--ref` | every `*.tsv` in `reference/` | One TF–target reference file per DB; repeat the option for several DBs |
+| `--outdir` | `output` | Output folder |
 | `--n-perm` | 100000 | Number of random draws |
 | `--seed` | 42 | Random seed (non-negative integer) |
+
+Keep one species per pipeline folder: all DBs in `reference/` are tested against the same id-map
+and background, so a reference from another species would give p = 1 for all of its TFs.
 
 ## Inputs
 
@@ -69,8 +92,9 @@ ENSMUSG00000000078	23849	Klf6
 test uses only the two symbol columns: the four ID columns must be present but may be blank, and
 they are not copied to the outputs. Rows with a blank TF or target symbol are dropped; a file left
 with no pairs is skipped. The DB name used in the output is the file name without its extension
-(`refs/DB_A.tsv` → `DB_A`). The rows below show the format only; they are not real regulatory
-relations.
+(`reference/DB_A.tsv` → `DB_A`). Only `.tsv` files are read from `reference/`, so other files
+there (notes, metadata) are ignored. The rows below show the format only; they are not real
+regulatory relations.
 
 ```
 TF_Ensembl	TF_Entrez	TF_symbol	Target_Ensembl	Target_Entrez	Target_symbol
@@ -149,8 +173,9 @@ belongs to the run that `run.log` describes.
 | Malformed file (missing column, unreadable encoding, a quoted field spanning several lines, duplicate DB names) | 1 | `FAILED: ...` |
 
 Command-line errors (unknown option, missing required option, a value that is not an integer,
-`--n-perm` below 1, a negative `--seed`, an input file that does not exist) exit with 2 before
-anything in `--outdir` is created or deleted. A reference file without usable pairs is skipped and
+`--n-perm` below 1, a negative `--seed`, an input file that does not exist, no `*.tsv` in
+`reference/` when `--ref` is omitted) exit with 2 before anything in `--outdir` is created or
+deleted. A reference file without usable pairs is skipped and
 noted in the log while the other DBs still run.
 
 ## Runtime

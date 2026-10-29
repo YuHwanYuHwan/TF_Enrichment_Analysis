@@ -187,13 +187,19 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="TF-target enrichment with an empirical null, one test per TF per reference DB.")
     ap.add_argument("--input", required=True, help="gene IDs to test (Ensembl or Entrez), one per line")
     ap.add_argument("--background", required=True, help="background gene IDs, one per line")
-    ap.add_argument("--id-map", required=True, help="TSV with columns Ensembl, Entrez, symbol (same species)")
-    ap.add_argument("--ref", required=True, action="append",
-                    help="TF-target reference TSV; repeat once per DB (DB name = file name stem)")
-    ap.add_argument("--outdir", required=True, help="output folder")
+    ap.add_argument("--id-map", default="input/id_map.tsv",
+                    help="TSV with columns Ensembl, Entrez, symbol (same species) (default: %(default)s)")
+    ap.add_argument("--ref", action="append",
+                    help="TF-target reference TSV; repeat once per DB (DB name = file name stem). "
+                         "Default: every *.tsv in reference/")
+    ap.add_argument("--outdir", default="output", help="output folder (default: %(default)s)")
     ap.add_argument("--n-perm", type=int, default=100_000, help="number of random draws (default: %(default)s)")
     ap.add_argument("--seed", type=int, default=42, help="random seed, non-negative integer (default: %(default)s)")
     args = ap.parse_args(argv)
+    if not args.ref:
+        args.ref = sorted(str(p) for p in Path("reference").glob("*.tsv"))
+        if not args.ref:
+            ap.error("no reference files: pass --ref, or put one *.tsv per DB in reference/")
     # Reject bad arguments before --outdir is touched, so old results survive a typo.
     if args.n_perm < 1 or args.seed < 0:
         ap.error("--n-perm must be >= 1 and --seed >= 0")
