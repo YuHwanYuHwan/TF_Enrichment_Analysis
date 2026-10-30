@@ -15,26 +15,28 @@ packages.
 
 ## Quick start
 
-Set up a pipeline folder, one per species:
+Set up a pipeline folder with one reference folder per species:
 
 ```
 TF_Enrichment_Pipeline/
-├── input/       gene list to test, background list, id_map.tsv
-├── reference/   one *.tsv per TF–target DB
-├── output/      results (created if missing)
-└── script/      tf_enrichment.py
+├── input/         gene list to test, background list
+├── reference/
+│   ├── mouse/     gene_id_symbol_master.tsv (the id-map) and one *.tsv per TF–target DB
+│   └── human/     the same files for human
+├── output/        results (created if missing)
+└── script/        tf_enrichment.py
 ```
 
-Then run from the pipeline folder:
+Then run from the pipeline folder, naming the species folder with `--ref-dir`:
 
 ```bash
 cd TF_Enrichment_Pipeline
-python script/tf_enrichment.py --input input/genes.txt --background input/background.txt
+python script/tf_enrichment.py --ref-dir reference/mouse --input input/genes.txt --background input/background.txt
 ```
 
-Every `*.tsv` file in `reference/` is tested as one DB, `input/id_map.tsv` converts IDs to
-symbols, and results go to `output/`. These defaults are relative to the folder you run from; any
-of them can be replaced with an explicit path:
+In the `--ref-dir` folder, `gene_id_symbol_master.tsv` is the id-map that converts IDs to symbols
+and every other `*.tsv` file is tested as one DB; results go to `output/`. These defaults are
+relative to the folder you run from; any of them can be replaced with an explicit path:
 
 ```bash
 python tf_enrichment.py \
@@ -44,18 +46,25 @@ python tf_enrichment.py \
   --outdir results/
 ```
 
+When `--ref` is omitted, only the id-map in use is left out of the DBs. So if `--id-map` names
+another file, a `gene_id_symbol_master.tsv` still in `--ref-dir` is read as a DB and the run fails
+with a missing-column error; name the DBs with `--ref` as well, as in the example above.
+
 | Option | Default | Meaning |
 |---|---|---|
 | `--input` | required | Gene IDs to test |
 | `--background` | required | Gene IDs the null distribution draws from |
-| `--id-map` | `input/id_map.tsv` | ID-to-symbol table for the same species |
-| `--ref` | every `*.tsv` in `reference/` | One TF–target reference file per DB; repeat the option for several DBs |
+| `--ref-dir` | `reference` | Folder of one species holding the id-map and one `*.tsv` per DB |
+| `--id-map` | `<ref-dir>/gene_id_symbol_master.tsv` | ID-to-symbol table for the same species |
+| `--ref` | every `*.tsv` in `<ref-dir>` except the id-map | One TF–target reference file per DB; repeat the option for several DBs |
 | `--outdir` | `output` | Output folder |
 | `--n-perm` | 100000 | Number of random draws |
 | `--seed` | 42 | Random seed (non-negative integer) |
 
-Keep one species per pipeline folder: all DBs in `reference/` are tested against the same id-map
-and background, so a reference from another species would give p = 1 for all of its TFs.
+Keep one species per reference folder (`--ref-dir`): all DBs in it are tested against the same
+id-map and background, so a reference from another species would give p = 1 for all of its TFs.
+Give each species its own `--outdir` as well (for example `output/mouse` and `output/human`),
+because a run replaces the results already in its `--outdir`.
 
 ## Inputs
 
@@ -77,24 +86,25 @@ ENSMUSG00000000028
 67608
 ```
 
-**`--id-map`** — columns `Ensembl`, `Entrez`, `symbol`, covering every gene of the species (not
-only DB targets). Either ID column may be blank on a row.
+**`--id-map`** — a long table with one ID per row. Columns `gene_id` and `gene_symbol` are
+required; other columns (such as `id_type` below) are ignored. Cover every gene of the species
+(not only DB targets), with Ensembl and Entrez IDs on separate rows. One ID may appear on several
+rows: rows repeating the same symbol count once, and an ID with two different symbols is excluded
+as `AMBIGUOUS_SYMBOL`. The rows below show the format only:
 
 ```
-Ensembl	Entrez	symbol
-ENSMUSG00000000001	14679	Gnai3
-ENSMUSG00000000028	12544	Cdc45
-ENSMUSG00000000056	67608	Narf
-ENSMUSG00000000078	23849	Klf6
+id_type	gene_id	gene_symbol
+ensembl	ENSMUSG00000000001	Gnai3
+entrez	14679	Gnai3
 ```
 
 **`--ref`** — one file per DB with the six columns below. One row is one TF–target relation. The
 test uses only the two symbol columns: the four ID columns must be present but may be blank, and
 they are not copied to the outputs. Rows with a blank TF or target symbol are dropped; a file left
 with no pairs is skipped. The DB name used in the output is the file name without its extension
-(`reference/DB_A.tsv` → `DB_A`). Only `.tsv` files are read from `reference/`, so other files
-there (notes, metadata) are ignored. The rows below show the format only; they are not real
-regulatory relations.
+(`reference/mouse/DB_A.tsv` → `DB_A`). Only `.tsv` files other than the id-map are read from
+`--ref-dir`, so other files there (notes, metadata) are ignored. The rows below show the format
+only; they are not real regulatory relations.
 
 ```
 TF_Ensembl	TF_Entrez	TF_symbol	Target_Ensembl	Target_Entrez	Target_symbol
@@ -173,9 +183,9 @@ belongs to the run that `run.log` describes.
 | Malformed file (missing column, unreadable encoding, a quoted field spanning several lines, duplicate DB names) | 1 | `FAILED: ...` |
 
 Command-line errors (unknown option, missing required option, a value that is not an integer,
-`--n-perm` below 1, a negative `--seed`, an input file that does not exist, no `*.tsv` in
-`reference/` when `--ref` is omitted) exit with 2 before anything in `--outdir` is created or
-deleted. A reference file without usable pairs is skipped and
+`--n-perm` below 1, a negative `--seed`, an input file that does not exist, the id-map given as a
+`--ref`, no DB file in `--ref-dir` when `--ref` is omitted) exit with 2 before anything in
+`--outdir` is created or deleted. A reference file without usable pairs is skipped and
 noted in the log while the other DBs still run.
 
 ## Runtime

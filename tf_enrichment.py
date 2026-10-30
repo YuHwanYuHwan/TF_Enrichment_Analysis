@@ -8,6 +8,7 @@ See README.md for inputs and outputs.
 """
 import argparse
 import hashlib
+import os
 import platform
 import shlex
 import sys
@@ -21,7 +22,7 @@ import scipy
 from scipy.sparse import csr_matrix
 
 REF_COLS = ["TF_Ensembl", "TF_Entrez", "TF_symbol", "Target_Ensembl", "Target_Entrez", "Target_symbol"]
-MAP_COLS = ["Ensembl", "Entrez", "symbol"]
+MAP_COLS = ["gene_id", "gene_symbol"]
 EXCLUDED_COLS = ["set", "file", "id", "reason", "candidates"]
 CHUNK_BYTES = 256 * 2**20  # caps the per-block arrays (draws, sparse sample matrix, null counts)
 
@@ -49,14 +50,14 @@ def read_tsv(path, required):
 
 
 def load_id_map(path):
+    # Long format: one ID per row, and an ID may repeat; a repeated identical symbol counts once.
     m = read_tsv(path, MAP_COLS)
     known, symbols = set(), {}
-    for col in ("Ensembl", "Entrez"):
-        for gid, sym in zip(m[col], m["symbol"]):
-            if gid:
-                known.add(gid)
-                if sym:
-                    symbols.setdefault(gid, set()).add(sym)
+    for gid, sym in zip(m["gene_id"], m["gene_symbol"]):
+        if gid:
+            known.add(gid)
+            if sym:
+                symbols.setdefault(gid, set()).add(sym)
     return known, symbols
 
 
@@ -183,23 +184,40 @@ def sha256(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
+def same_file(a, b):
+    try:
+        return os.path.samefile(a, b)
+    except OSError:  # a missing file is reported as not found further down
+        return False
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="TF-target enrichment with an empirical null, one test per TF per reference DB.")
     ap.add_argument("--input", required=True, help="gene IDs to test (Ensembl or Entrez), one per line")
     ap.add_argument("--background", required=True, help="background gene IDs, one per line")
-    ap.add_argument("--id-map", default="input/id_map.tsv",
-                    help="TSV with columns Ensembl, Entrez, symbol (same species) (default: %(default)s)")
+    ap.add_argument("--ref-dir", default="reference",
+                    help="folder of one species holding the id-map and one *.tsv per DB (default: %(default)s)")
+    ap.add_argument("--id-map",
+                    help="TSV with columns gene_id, gene_symbol (same species; other columns ignored) "
+                         "(default: <ref-dir>/gene_id_symbol_master.tsv)")
     ap.add_argument("--ref", action="append",
                     help="TF-target reference TSV; repeat once per DB (DB name = file name stem). "
-                         "Default: every *.tsv in reference/")
+                         "Default: every *.tsv in --ref-dir except the id-map")
     ap.add_argument("--outdir", default="output", help="output folder (default: %(default)s)")
     ap.add_argument("--n-perm", type=int, default=100_000, help="number of random draws (default: %(default)s)")
     ap.add_argument("--seed", type=int, default=42, help="random seed, non-negative integer (default: %(default)s)")
     args = ap.parse_args(argv)
-    if not args.ref:
-        args.ref = sorted(str(p) for p in Path("reference").glob("*.tsv"))
+    if args.id_map is None:
+        args.id_map = str(Path(args.ref_dir) / "gene_id_symbol_master.tsv")
+    if args.ref:
+        named = [r for r in args.ref if same_file(r, args.id_map)]
+        if named:
+            ap.error(f"--ref {', '.join(named)} is the id-map, not a TF-target reference")
+    else:
+        args.ref = sorted(str(p) for p in Path(args.ref_dir).glob("*.tsv") if not same_file(p, args.id_map))
         if not args.ref:
-            ap.error("no reference files: pass --ref, or put one *.tsv per DB in reference/")
+            ap.error(f"no reference files in {args.ref_dir}: put one *.tsv per DB there next to the id-map, "
+                     "or pass --ref")
     # Reject bad arguments before --outdir is touched, so old results survive a typo.
     if args.n_perm < 1 or args.seed < 0:
         ap.error("--n-perm must be >= 1 and --seed >= 0")
