@@ -161,8 +161,8 @@ Notes:
 
 | File | Content |
 |---|---|
-| `per_db/<DB>.csv` | `TF`, `p_value`, `hit_genes` (input genes that are targets of the TF, comma-separated), sorted by p-value |
-| `merged.csv` | `TF`, then `<DB>_p_value` and `<DB>_hit_genes` for each DB in `--ref` order (a skipped DB has no columns). An empty p-value means the TF is not in that DB |
+| `per_db/<DB>.csv` | `TF`, `p_value`, `hit_genes` (input genes that are targets of the TF, comma-separated; `N/A` when none is), sorted by p-value |
+| `merged.csv` | `TF`, then `<DB>_p_value` and `<DB>_hit_genes` for each DB in `--ref` order (a skipped DB has no columns). `N/A` in both columns means the TF is not in that DB; a p-value with `N/A` genes means no input gene is a target |
 | `excluded_ids.tsv` | IDs dropped during conversion: input or background, source file, ID, reason, candidate symbols |
 | `run.log` | Date, command, package versions, seed, n_perm, SHA-256 of every input file, gene counts after conversion, per-DB counts (rows, unique pairs, TFs, targets, targets outside the background) and the final status |
 

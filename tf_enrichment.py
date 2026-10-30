@@ -125,7 +125,7 @@ def enrich_db(pairs, input_syms, bg_syms, n_perm, seed):
     hits = pairs[pairs["Target_symbol"].isin(set(input_syms))]
     hit_genes = hits.groupby("TF_symbol")["Target_symbol"].agg(lambda s: ",".join(sorted(s)))
     return pd.DataFrame({"TF": tfs, "p_value": exceed / n_perm,
-                         "hit_genes": hit_genes.reindex(tfs).fillna("").to_numpy()})
+                         "hit_genes": hit_genes.reindex(tfs).to_numpy()})  # NaN (written as N/A) when no hit
 
 
 def merge_results(results):
@@ -240,8 +240,8 @@ def main(argv=None):
         results, merged = run(args.input, args.background, args.id_map, args.ref,
                               args.n_perm, args.seed, log, excluded)
         for label, res in results.items():
-            res.sort_values(["p_value", "TF"]).to_csv(out / "per_db" / f"{label}.csv", index=False)
-        merged.to_csv(out / "merged.csv", index=False)
+            res.sort_values(["p_value", "TF"]).to_csv(out / "per_db" / f"{label}.csv", index=False, na_rep="N/A")
+        merged.to_csv(out / "merged.csv", index=False, na_rep="N/A")
         log.append("done")
     except AnalysisStop as e:
         log.append(f"STOPPED: {e}")
