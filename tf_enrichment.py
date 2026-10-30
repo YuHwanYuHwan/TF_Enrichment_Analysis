@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """TF-target enrichment with an empirical null, tested separately for each reference DB.
 
-Draw as many genes as the input from the background without replacement, count each TF's targets
+Input: one table, one 'gene ID,flag' per line. Genes flagged 1 are tested; every gene in the table is the background.
+Draw as many genes as are tested from the background without replacement, count each TF's targets
 among them, repeat n_perm times, p = #(null hits >= observed hits) / n_perm.
 No +1, no multiple-testing correction.
 See README.md for inputs and outputs.
@@ -10,6 +11,7 @@ import argparse
 import hashlib
 import os
 import platform
+import re
 import shlex
 import sys
 from collections import Counter
@@ -31,10 +33,20 @@ class AnalysisStop(Exception):
     """The data cannot be tested; the message is written to the log."""
 
 
-def read_ids(path):
-    lines = Path(path).read_text(encoding="utf-8-sig").splitlines()
-    ids = (s.strip() for s in lines)
-    return list(dict.fromkeys(s for s in ids if s and not s.startswith("#")))
+def read_input(path):
+    """One 'gene ID,flag' per line (comma or tab). Returns (IDs flagged 1, every ID): the tested genes and the background."""
+    tested, every = [], []
+    for n, line in enumerate(Path(path).read_text(encoding="utf-8-sig").splitlines(), 1):
+        s = line.strip()
+        if not s or s.startswith("#"):
+            continue
+        parts = re.split(r"[,\t]", s)
+        if len(parts) < 2:
+            raise ValueError(f"{path}:{n}: expected 'gene ID,flag', got {s!r}")
+        every.append(parts[0].strip())
+        if parts[1].strip() == "1":
+            tested.append(parts[0].strip())
+    return list(dict.fromkeys(tested)), list(dict.fromkeys(every))
 
 
 def read_tsv(path, required):
@@ -136,7 +148,7 @@ def merge_results(results):
     return merged.sort_values("TF").reset_index(drop=True)
 
 
-def run(input_path, background_path, id_map_path, ref_paths, n_perm, seed, log, excluded):
+def run(input_path, id_map_path, ref_paths, n_perm, seed, log, excluded):
     """Returns ({db: per-DB table}, merged table). Appends to the caller's log/excluded lists."""
     if n_perm < 1 or seed < 0:
         raise ValueError("--n-perm must be >= 1 and --seed >= 0")
@@ -145,23 +157,20 @@ def run(input_path, background_path, id_map_path, ref_paths, n_perm, seed, log, 
         raise ValueError(f"reference file names must be unique, ignoring case (DB name = file name stem): {labels}")
 
     known, symbols = load_id_map(id_map_path)
+    tested, every = read_input(input_path)
+    # The tested genes are rows of the same table, so they are always inside the background.
     sets = {}
-    for kind, path in (("input", input_path), ("background", background_path)):
-        ids = read_ids(path)
-        syms, exc = map_ids(ids, known, symbols, kind, path)
+    for kind, ids in (("input", tested), ("background", every)):
+        syms, exc = map_ids(ids, known, symbols, kind, input_path)
         excluded += exc
         sets[kind] = syms
         reasons = ", ".join(f"{r} {n}" for r, n in sorted(Counter(e["reason"] for e in exc).items())) or "none"
         log.append(f"{kind}: {len(ids)} unique IDs, excluded {len(exc)} ({reasons}), "
                    f"{len(ids) - len(exc) - len(syms)} collapsed into shared symbols, "
-                   f"{len(syms)} unique symbols used ({path})")
+                   f"{len(syms)} unique symbols used ({'flag 1' if kind == 'input' else 'every row'})")
     for kind, syms in sets.items():
         if not syms:
-            raise AnalysisStop(f"{kind} is empty after ID conversion")
-    outside = sorted(set(sets["input"]) - set(sets["background"]))
-    if outside:
-        raise AnalysisStop(f"{len(outside)} input symbols are not in the background, so the null could never "
-                           f"draw them: {', '.join(outside)}")
+            raise AnalysisStop(f"{kind} is empty after ID conversion (input = genes flagged 1)")
 
     bg_set = set(sets["background"])
     results = {}
@@ -193,8 +202,9 @@ def same_file(a, b):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description="TF-target enrichment with an empirical null, one test per TF per reference DB.")
-    ap.add_argument("--input", required=True, help="gene IDs to test (Ensembl or Entrez), one per line")
-    ap.add_argument("--background", required=True, help="background gene IDs, one per line")
+    ap.add_argument("--input", required=True,
+                    help="one 'gene ID,flag' per line (Ensembl or Entrez ID; comma or tab): genes flagged 1 are "
+                         "tested, every gene in the file is the background")
     ap.add_argument("--ref-dir", default="reference",
                     help="folder of one species holding the id-map and one *.tsv per DB (default: %(default)s)")
     ap.add_argument("--id-map",
@@ -221,7 +231,7 @@ def main(argv=None):
     # Reject bad arguments before --outdir is touched, so old results survive a typo.
     if args.n_perm < 1 or args.seed < 0:
         ap.error("--n-perm must be >= 1 and --seed >= 0")
-    absent = [p for p in [args.input, args.background, args.id_map, *args.ref] if not Path(p).is_file()]
+    absent = [p for p in [args.input, args.id_map, *args.ref] if not Path(p).is_file()]
     if absent:
         ap.error(f"file not found: {', '.join(absent)}")
 
@@ -235,10 +245,9 @@ def main(argv=None):
            f"n_perm {args.n_perm}, seed {args.seed}"]
     excluded, status = [], 0
     try:
-        for p in [args.input, args.background, args.id_map, *args.ref]:
+        for p in [args.input, args.id_map, *args.ref]:
             log.append(f"sha256 {sha256(p)} {p}")
-        results, merged = run(args.input, args.background, args.id_map, args.ref,
-                              args.n_perm, args.seed, log, excluded)
+        results, merged = run(args.input, args.id_map, args.ref, args.n_perm, args.seed, log, excluded)
         for label, res in results.items():
             res.sort_values(["p_value", "TF"]).to_csv(out / "per_db" / f"{label}.csv", index=False, na_rep="N/A")
         merged.to_csv(out / "merged.csv", index=False, na_rep="N/A")
